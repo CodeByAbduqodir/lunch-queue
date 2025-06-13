@@ -26,6 +26,7 @@ class TelegramCommandHandler
                     $message .= "You are a supervisor and the following commands are available to you:\n\n";
                     $message .= "/startsession - Start a new queue session\n";
                     $message .= "/status - Show the current queue status\n";
+                    $message .= "/startlunch - Start the queue manually";
                     $message .= "/setlimit {number} - Set the limit of concurrent lunches\n";
                     $message .= "/cancel - Cancel the current session\n";
                     $message .= "/help - Show this message";
@@ -57,7 +58,7 @@ class TelegramCommandHandler
             return true;
         }
 
-        if ($text === '/start-queue') {
+        if ($text === '/startlunch') {
             $this->lunchQueueService->startQueueManually($chatId);
             return true;
         }

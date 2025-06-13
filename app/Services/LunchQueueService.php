@@ -345,8 +345,10 @@ class LunchQueueService
     {
         $message = "👨‍💼 <b>Supervisor commands:</b>\n\n";
         $message .= "/status - current queue status\n";
+        $message .= "/startlunch - start queue manually\n";
         $message .= "/setlimit 3 - set limit\n";
         $message .= "/cancel - cancel collection\n";
+        $message .= "/startsession - start new session\n";
         $message .= "/help - this help";
         $this->telegramService->sendMessage($chatId, $message);
     }
