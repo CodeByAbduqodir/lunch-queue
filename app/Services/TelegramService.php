@@ -19,7 +19,6 @@ class TelegramService
         $this->baseUrl = "https://api.telegram.org/bot{$this->botToken}/";
     }
 
-    // Отправить сообщение пользователю
     public function sendMessage(string $chatId, string $text, array $keyboard = null): bool
     {
         try {
@@ -44,7 +43,6 @@ class TelegramService
         }
     }
 
-    // Создать инлайн клавиатуру (кнопки)
     public function createInlineKeyboard(array $buttons): array
     {
         return [
@@ -52,7 +50,6 @@ class TelegramService
         ];
     }
 
-    // Создать кнопку для записи в очередь
     public function createJoinQueueButton(int $sessionId): array
     {
         return [
@@ -65,7 +62,6 @@ class TelegramService
         ];
     }
 
-    // Создать кнопки для подтверждения обеда
     public function createLunchConfirmationButtons(int $queueId): array
     {
         return [

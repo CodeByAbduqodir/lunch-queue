@@ -15,9 +15,8 @@ class TelegramCommandHandler
 
     public function handle(\App\Models\User $user, string $chatId, string $text): void
     {
-        // Supervisor commands take priority
         if ($user->isSupervisor() && $this->handleSupervisorCommands($chatId, $text)) {
-            return; // Command was handled
+            return; 
         }
 
         switch ($text) {
@@ -28,7 +27,6 @@ class TelegramCommandHandler
                 $this->lunchQueueService->handleQueueCommand($chatId, $user);
                 break;
             case '/status':
-                 // Status is a supervisor-only command, so we check again here.
                 if ($user->isSupervisor()) {
                     $this->lunchQueueService->handleStatusCommand($chatId);
                 } else {
@@ -63,6 +61,6 @@ class TelegramCommandHandler
             return true;
         }
 
-        return false; // Not a supervisor command
+        return false; 
     }
 }
