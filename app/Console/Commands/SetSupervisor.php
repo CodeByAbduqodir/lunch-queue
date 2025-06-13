@@ -19,8 +19,12 @@ class SetSupervisor extends Command
         $user = User::where('telegram_id', $telegramId)->first();
 
         if (!$user) {
-            $this->error("User with ID {$telegramId} not found");
-            return;
+            $user = User::create([
+                'telegram_id' => $telegramId,
+                'first_name' => 'Supervisor',
+                'role' => 'supervisor'
+            ]);
+            $this->info("✅ Created new user with ID {$telegramId}");
         }
 
         $newRole = $remove ? 'operator' : 'supervisor';

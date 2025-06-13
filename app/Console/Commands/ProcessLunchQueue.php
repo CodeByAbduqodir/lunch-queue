@@ -66,7 +66,6 @@ class ProcessLunchQueue extends Command
             );
             
             if ($success) {
-                // Помечаем как уведомленного
                 $queueRecord->update([
                     'status' => 'notified',
                     'notified_at' => now()

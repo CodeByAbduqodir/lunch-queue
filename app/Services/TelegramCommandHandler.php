@@ -21,7 +21,18 @@ class TelegramCommandHandler
 
         switch ($text) {
             case '/start':
-                $this->lunchQueueService->handleStartCommand($chatId);
+                if ($user->isSupervisor()) {
+                    $message = "👋 Hello, {$user->first_name}!\n\n";
+                    $message .= "You are a supervisor and the following commands are available to you:\n\n";
+                    $message .= "/startsession - Start a new queue session\n";
+                    $message .= "/status - Show the current queue status\n";
+                    $message .= "/setlimit {number} - Set the limit of concurrent lunches\n";
+                    $message .= "/cancel - Cancel the current session\n";
+                    $message .= "/help - Show this message";
+                    $this->telegramService->sendMessage($chatId, $message);
+                } else {
+                    $this->lunchQueueService->handleStartCommand($chatId);
+                }
                 break;
             case '/queue':
                 $this->lunchQueueService->handleQueueCommand($chatId, $user);
@@ -41,6 +52,16 @@ class TelegramCommandHandler
 
     private function handleSupervisorCommands(string $chatId, string $text): bool
     {
+        if ($text === '/startsession') {
+            $this->lunchQueueService->startNewSession($chatId);
+            return true;
+        }
+
+        if ($text === '/start-queue') {
+            $this->lunchQueueService->startQueueManually($chatId);
+            return true;
+        }
+
         if (strpos($text, '/setlimit') === 0) {
             $parts = explode(' ', $text);
             if (count($parts) >= 2 && is_numeric($parts[1])) {
