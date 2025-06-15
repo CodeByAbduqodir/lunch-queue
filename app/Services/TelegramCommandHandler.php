@@ -28,6 +28,8 @@ class TelegramCommandHandler
                     $message .= "/status - Show the current queue status\n";
                     $message .= "/startlunch - Start the queue manually";
                     $message .= "/setlimit {number} - Set the limit of concurrent lunches\n";
+                    $message .= "/setgrouplimit {number} - Set the number of people in each lunch group\n";
+                    $message .= "/groups - Show current lunch groups\n";
                     $message .= "/cancel - Cancel the current session\n";
                     $message .= "/help - Show this message";
                     $this->telegramService->sendMessage($chatId, $message);
@@ -70,6 +72,21 @@ class TelegramCommandHandler
             } else {
                 $this->telegramService->sendMessage($chatId, "❌ Invalid format. Use: /setlimit <number>");
             }
+            return true;
+        }
+
+        if (strpos($text, '/setgrouplimit') === 0) {
+            $parts = explode(' ', $text);
+            if (count($parts) >= 2 && is_numeric($parts[1])) {
+                $this->lunchQueueService->updateGroupLimit($chatId, (int) $parts[1]);
+            } else {
+                $this->telegramService->sendMessage($chatId, "❌ Invalid format. Use: /setgrouplimit <number>");
+            }
+            return true;
+        }
+
+        if ($text === '/groups') {
+            $this->lunchQueueService->showGroups($chatId);
             return true;
         }
 

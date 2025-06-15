@@ -29,10 +29,14 @@ class User extends Model
 
     public function wasInQueueToday(): bool
     {
-        return $this->lunchQueues()
-            ->whereHas('lunchSession', function ($query) {
-                $query->where('date', today());
-            })
-            ->exists();
+        // Temporarily disabled for testing
+        return false;
+        
+        // Original code:
+        // return $this->lunchQueues()
+        //     ->whereHas('lunchSession', function ($query) {
+        //         $query->where('date', today()->toDateString());
+        //     })
+        //     ->exists();
     }
 }

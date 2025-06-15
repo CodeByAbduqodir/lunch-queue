@@ -25,7 +25,8 @@ class LunchQueueService
             'date' => $date,
             'announcement_time' => $announcementTime,
             'start_time' => '13:00', 
-            'max_concurrent_users' => 3, 
+            'max_concurrent_users' => 3,
+            'group_size' => 3, // Default group size
             'status' => 'collecting'
         ]);
     }
@@ -54,10 +55,10 @@ class LunchQueueService
     public function getNextUsersToNotify(LunchSession $session): array
     {
         $usersAtLunch = $session->getUsersAtLunch();
-        $maxConcurrent = $session->max_concurrent_users;
-        $canGoToLunch = $maxConcurrent - $usersAtLunch;
-
-        if ($canGoToLunch <= 0) {
+        $groupSize = $session->group_size;
+        
+        // If there are people at lunch, wait until they finish
+        if ($usersAtLunch > 0) {
             return [];
         }
 
@@ -65,9 +66,37 @@ class LunchQueueService
             ->where('status', 'waiting')
             ->with('user')
             ->orderBy('position')
-            ->take($canGoToLunch)
+            ->take($groupSize)
             ->get()
             ->toArray();
+    }
+
+    public function notifyGroupForLunch(array $users, LunchSession $session): void
+    {
+        $message = "🍽️ <b>Your lunch group is ready!</b>\n\n";
+        $message .= "Please confirm that you are ready to go to lunch by clicking the button below.\n";
+        $message .= "Your group members:\n";
+        
+        foreach ($users as $user) {
+            $message .= "👤 {$user['user']['first_name']}\n";
+        }
+
+        foreach ($users as $user) {
+            $keyboard = $this->telegramService->createInlineKeyboard([
+                [
+                    ['text' => '✅ I\'m Ready', 'callback_data' => "confirm_lunch_{$user['id']}"]
+                ]
+            ]);
+
+            $this->telegramService->sendMessage(
+                $user['user']['chat_id'],
+                $message,
+                $keyboard
+            );
+
+            // Update status to 'notified'
+            LunchQueue::where('id', $user['id'])->update(['status' => 'notified']);
+        }
     }
 
     public function startUserLunch(LunchQueue $queueRecord): bool
@@ -80,6 +109,9 @@ class LunchQueueService
             'status' => 'at_lunch',
             'lunch_started_at' => now()
         ]);
+
+        // Schedule reminder for 5 minutes before lunch ends
+        $this->scheduleLunchEndReminder($queueRecord);
 
         return true;
     }
@@ -120,6 +152,9 @@ class LunchQueueService
         if (strpos($data, 'join_queue_') === 0) {
             $sessionId = (int) str_replace('join_queue_', '', $data);
             $this->handleJoinQueue($chatId, $user, $sessionId);
+        } elseif (strpos($data, 'confirm_lunch_') === 0) {
+            $queueId = (int) str_replace('confirm_lunch_', '', $data);
+            $this->handleConfirmLunch($chatId, $user, $queueId);
         } elseif (strpos($data, 'start_lunch_') === 0) {
             $queueId = (int) str_replace('start_lunch_', '', $data);
             $this->handleStartLunch($chatId, $user, $queueId);
@@ -149,6 +184,68 @@ class LunchQueueService
         $this->telegramService->sendMessage($chatId, $message);
     }
 
+    private function handleConfirmLunch(string $chatId, User $user, int $queueId): void
+    {
+        $queueRecord = LunchQueue::where('id', $queueId)
+            ->where('user_id', $user->id)
+            ->with(['lunchSession', 'user'])
+            ->first();
+
+        if (!$queueRecord) {
+            $this->telegramService->sendMessage($chatId, "❌ Record not found.");
+            return;
+        }
+
+        if ($queueRecord->status !== 'notified') {
+            $this->telegramService->sendMessage($chatId, "❌ Your queue is not ready for confirmation.");
+            return;
+        }
+
+        // Update status to 'ready'
+        $queueRecord->update(['status' => 'ready']);
+
+        // Check if all group members are ready
+        $groupMembers = LunchQueue::where('lunch_session_id', $queueRecord->lunch_session_id)
+            ->where('status', 'notified')
+            ->orWhere('status', 'ready')
+            ->orderBy('position')
+            ->take($queueRecord->lunchSession->group_size)
+            ->get();
+
+        $allReady = $groupMembers->every(function ($member) {
+            return $member->status === 'ready';
+        });
+
+        if ($allReady) {
+            // All group members are ready, send start lunch buttons
+            foreach ($groupMembers as $member) {
+                $keyboard = $this->telegramService->createInlineKeyboard([
+                    [
+                        ['text' => '🍽️ Start Lunch', 'callback_data' => "start_lunch_{$member->id}"]
+                    ]
+                ]);
+
+                $message = "🎉 Everyone in your group is ready!\n";
+                $message .= "Click the button below when you actually start your lunch.";
+
+                $this->telegramService->sendMessage(
+                    $member->user->chat_id,
+                    $message,
+                    $keyboard
+                );
+            }
+        } else {
+            // Not everyone is ready yet
+            $readyCount = $groupMembers->where('status', 'ready')->count();
+            $totalCount = $groupMembers->count();
+            
+            $message = "✅ You confirmed you're ready!\n";
+            $message .= "Waiting for others: {$readyCount}/{$totalCount}";
+            
+            $this->telegramService->sendMessage($chatId, $message);
+        }
+    }
+
     private function handleStartLunch(string $chatId, User $user, int $queueId): void
     {
         $queueRecord = LunchQueue::where('id', $queueId)
@@ -161,27 +258,18 @@ class LunchQueueService
             return;
         }
 
-        if ($queueRecord->lunchSession->status !== 'active') {
-            $this->telegramService->sendMessage($chatId, "❌ Session is not active. Wait for the announcement.");
-            return;
-        }
-
-        if ($queueRecord->status !== 'notified') {
-            $this->telegramService->sendMessage($chatId, "❌ Your queue is not ready. Wait for the announcement.");
+        if ($queueRecord->status !== 'ready') {
+            $this->telegramService->sendMessage($chatId, "❌ Your queue is not ready to start lunch.");
             return;
         }
 
         $success = $this->startUserLunch($queueRecord);
 
         if ($success) {
-            $this->telegramService->deleteMessage($chatId, $queueRecord->message_id);
-            
             $message = "🍽️ Enjoy your lunch! Don't forget to return in 30 minutes! ⏰";
             $this->telegramService->sendMessage($chatId, $message);
-
-            $this->scheduleReturnReminder($queueRecord);
         } else {
-            $message = "❌ Error confirming lunch. Maybe your queue is not ready.";
+            $message = "❌ Error starting lunch. Please try again.";
             $this->telegramService->sendMessage($chatId, $message);
         }
     }
@@ -209,26 +297,21 @@ class LunchQueueService
         $this->notifySupervisorsAboutReturn($user);
     }
 
-    private function scheduleReturnReminder(LunchQueue $queueRecord): void
+    private function scheduleLunchEndReminder(LunchQueue $queueRecord): void
     {
-        $reminderTime = now()->addMinutes(30);
+        $reminderTime = now()->addMinutes(25); // 5 minutes before 30-minute lunch ends
         
-        $message = "⏰ <b>Reminder about returning from lunch</b>\n\n";
-        $message .= "Please confirm that you have returned from lunch:";
-        
-        $keyboard = $this->telegramService->createInlineKeyboard(
-            $this->telegramService->createReturnConfirmationButtons($queueRecord->id)
-        );
+        // Schedule the reminder
+        dispatch(function () use ($queueRecord) {
+            $this->sendLunchEndReminder($queueRecord);
+        })->delay($reminderTime);
+    }
 
-        \Illuminate\Support\Facades\Schedule::call(function () use ($queueRecord, $message, $keyboard) {
-            if ($queueRecord->status === 'at_lunch') {
-                $this->telegramService->sendMessage(
-                    $queueRecord->user->telegram_id,
-                    $message,
-                    $keyboard
-                );
-            }
-        })->at($reminderTime);
+    private function sendLunchEndReminder(LunchQueue $queueRecord): void
+    {
+        $user = $queueRecord->user;
+        $message = "⚠️ Attention! Your lunch break will end in 5 minutes. Please finish your meal and return to work soon!";
+        $this->telegramService->sendMessage($user->chat_id, $message);
     }
 
     private function notifySupervisorsAboutReturn(User $user): void
@@ -401,7 +484,7 @@ class LunchQueueService
             $announcement = "🍽️ <b>Announcement of lunch collection!</b>\n\n";
             $announcement .= "⏰ Time: 13:00 - 13:30\n";
             $announcement .= "👥 Simultaneously: up to {$session->max_concurrent_users} people\n";
-            $announcement .= "📝 Use the /queue command to register";
+            $message .= "📝 Use the /queue command to register";
             
             $this->telegramService->sendMessage($groupChatId, $announcement);
             
@@ -487,5 +570,80 @@ class LunchQueueService
             
             $this->telegramService->sendMessage($supervisor->telegram_id, $message);
         }
+    }
+
+    public function updateGroupLimit(string $chatId, int $limit): void
+    {
+        $session = $this->getActiveSession();
+        if (!$session) {
+            $this->telegramService->sendMessage($chatId, "❌ No active session found.");
+            return;
+        }
+
+        $session->update(['group_size' => $limit]);
+        $this->telegramService->sendMessage($chatId, "✅ Group size has been updated to {$limit} people.");
+    }
+
+    public function showGroups(string $chatId): void
+    {
+        $session = $this->getActiveSession();
+        if (!$session) {
+            $this->telegramService->sendMessage($chatId, "❌ No active session found.");
+            return;
+        }
+
+        $queue = $session->lunchQueues()
+            ->with('user')
+            ->orderBy('position')
+            ->get();
+
+        if ($queue->isEmpty()) {
+            $this->telegramService->sendMessage($chatId, "📝 No one is in the queue yet.");
+            return;
+        }
+
+        $groupSize = $session->group_size;
+        $groups = $queue->chunk($groupSize);
+        $message = "📋 <b>Current Lunch Groups</b>\n\n";
+
+        foreach ($groups as $index => $group) {
+            $groupNumber = $index + 1;
+            $status = $this->getGroupStatus($group);
+            $message .= "👥 <b>Group {$groupNumber}</b> ({$status})\n";
+            
+            foreach ($group as $queueItem) {
+                $emoji = $this->getStatusEmoji($queueItem->status);
+                $message .= "{$emoji} {$queueItem->user->first_name} - {$this->translateStatus($queueItem->status)}\n";
+            }
+            $message .= "\n";
+        }
+
+        $message .= "\nTotal people in queue: {$queue->count()}\n";
+        $message .= "Group size: {$groupSize} people";
+
+        $this->telegramService->sendMessage($chatId, $message);
+    }
+
+    private function getGroupStatus($group): string
+    {
+        $statuses = $group->pluck('status')->unique();
+        
+        if ($statuses->contains('at_lunch')) {
+            return '🟡 At Lunch';
+        } elseif ($statuses->contains('finished')) {
+            return '🟢 Finished';
+        } elseif ($statuses->contains('notified')) {
+            return '🔵 Ready to Start';
+        } else {
+            return '⚪️ Waiting';
+        }
+    }
+
+    private function getActiveSession(): ?LunchSession
+    {
+        return LunchSession::where('date', today()->toDateString())
+            ->whereIn('status', ['collecting', 'active'])
+            ->latest()
+            ->first();
     }
 }

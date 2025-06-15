@@ -13,6 +13,7 @@ class LunchSession extends Model
         'announcement_time',
         'start_time',
         'max_concurrent_users',
+        'group_size',
         'status'
     ];
 

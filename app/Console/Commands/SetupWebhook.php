@@ -20,14 +20,14 @@ class SetupWebhook extends Command
             $botToken = config('services.telegram.bot_token');
             
             if ($this->option('delete')) {
-                $response = $client->post("https://api.telegram.org/bot{$botToken}/deleteWebhook");
+                $response = $client->post("https://api.telegram.org/bot$botToken/deleteWebhook");
                 $this->info("✅ Webhook deleted");
                 return;
             }
 
             $webhookUrl = config('app.url') . '/api/telegram/webhook';
             
-            $response = $client->post("https://api.telegram.org/bot{$botToken}/setWebhook", [
+            $response = $client->post("https://api.telegram.org/bot$botToken/setWebhook", [
                 'json' => [
                     'url' => $webhookUrl,
                     'allowed_updates' => ['message', 'callback_query']
